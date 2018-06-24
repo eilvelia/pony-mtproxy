@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+ponyc src -b pony-mtproxy "$@"

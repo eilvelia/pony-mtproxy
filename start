@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+./build \
+  && echo \
+  && echo \
+  && ./pony-mtproxy
