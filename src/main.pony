@@ -2,8 +2,8 @@ use net = "net"
 use "options"
 use "debug"
 
-type Secret is String
 type Port is String
+type Secret is String
 
 actor Main
   let _env: Env

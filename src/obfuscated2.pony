@@ -98,7 +98,7 @@ primitive Obfuscated2Util
       buf'.undefined[U8](64)
 
       try
-    		while true do
+        while true do
           for i in buf'.keys() do
             buf'(i)? = rand.u8()
           end
@@ -112,18 +112,18 @@ primitive Obfuscated2Util
 
           if val2 == 0x00000000 then continue end
 
-    			let val1 = (buf'(3)?.u32() << 24)
+          let val1 = (buf'(3)?.u32() << 24)
             or (buf'(2)?.u32() << 16)
             or (buf'(1)?.u32() << 8)
             or (buf'(0)?.u32())
 
-    			if    (val1 != 0x44414548)
-    				and (val1 != 0x54534f50)
-    				and (val1 != 0x20544547)
-    				and (val1 != 0x4954504f)
-    				and (val1 != 0xeeeeeeee)
+          if    (val1 != 0x44414548)
+            and (val1 != 0x54534f50)
+            and (val1 != 0x20544547)
+            and (val1 != 0x4954504f)
+            and (val1 != 0xeeeeeeee)
           then break end
-    		end
+        end
 
         buf'(56)? = 0xef
         buf'(57)? = 0xef
