@@ -1,0 +1,11 @@
+.DS_Store
+*.bak
+*.o
+*.elf
+*.dSYM/
+build/
+pony-mtproxy
+*.dylib
+*.so
+*.dll
+/*.txt
