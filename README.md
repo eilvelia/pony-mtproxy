@@ -42,7 +42,7 @@ Requirements:
 ## Docker
 
 ```console
-$ docker run --name mtproxy -d --restart unless-stopped -p 443:443 bannerets/mtproxy:latest --secret 15abcdef1234567890deadbeef123456
+$ docker run --name mtproxy -d --restart unless-stopped -p 443:443 bannerets/pony-mtproxy:latest --secret 15abcdef1234567890deadbeef123456
 ```
 
 #### Logs
