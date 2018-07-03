@@ -1,5 +1,5 @@
-use "path:/usr/local/opt/libressl/lib" if osx
-use "lib:crypto"
+// use "path:/usr/local/opt/libressl/lib" if osx
+// use "lib:crypto"
 
 use @EVP_CIPHER_CTX_new[Pointer[_EVPCIPHERCTX] tag]()
 

@@ -91,10 +91,8 @@ actor Proxy
 
     Debug("server_buffer packets " + _server_buffer.size().string())
     for packet in _server_buffer.values() do
-      if packet.size() > 0 then
-        Debug("Send packet from buffer " + packet.size().string())
-        _send_to_server(packet)
-      end
+      Debug("Send packet from buffer " + packet.size().string())
+      _send_to_server(packet)
     end
 
   be received_client (data: Bytes) =>
@@ -118,7 +116,7 @@ actor Proxy
         data
       else
         _initialized = true
-        initialize(data)
+        _initialize(data)
         recover val data.slice(64) end
       end
 
@@ -134,7 +132,6 @@ actor Proxy
       if dec_payload.size() > 0 then
         _send_to_server(dec_payload)
       end
-
     else
       Debug("Decryptor not defined")
     end
@@ -180,7 +177,7 @@ actor Proxy
       _server_buffer.push(data)
     end
 
-  fun ref initialize (data: Bytes) =>
+  fun ref _initialize (data: Bytes) =>
     let obf_enc_key_bytes = recover val data.slice(0, 64) end
 
     let decryptor = ClientDecryptor(_secret, obf_enc_key_bytes)

@@ -1,4 +1,6 @@
+.git
+*.dSYM
 *.bak
-*/*.o
+*.o
 *.dylib
 pony-mtproxy

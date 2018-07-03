@@ -4,6 +4,11 @@ Yet another Telegram MTProto Proxy server.
 
 wip
 
+- Crossplatform.
+- Multithreaded.
+- No promoted channels support.
+- No multi secret support.
+
 ## Usage
 
 ```console
@@ -38,6 +43,7 @@ ponyc src -b pony-mtproxy
 Requirements:
 
 - `ponyc`
+- `openssl`
 
 ## Docker
 
