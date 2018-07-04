@@ -30,6 +30,7 @@ actor Pool
   let _timers: Timers = Timers
   let _closed_conns: Set[ConnectionID] = Set[ConnectionID]
   let _connected_conns: Array[ConnectionList] = PoolUtil.create_connections_array()
+  let _connected_intermediate_conns: Array[ConnectionList] = PoolUtil.create_connections_array()
   var _conn_id: ConnectionID = 0
   var _client_conns_count: U64 = 0
 
@@ -40,14 +41,17 @@ actor Pool
 
     for (dc_id, host) in Constants.telegram_servers().values() do
       for _ in Range[U32](0, min_idle_servers) do
-        _create_new_connection(dc_id)
+        create_new_connection(dc_id, false)
+        create_new_connection(dc_id, true)
       end
     end
 
     let ns: U64 = Constants.stats_interval()
     _timers(Timer(StatsTimerNotify(this), ns, ns))
 
-  be _create_new_connection (dc_id: DcID) =>
+  be create_new_connection (dc_id: DcID, intermediate: Bool = false, unused: String = "") =>
+    // Compiler crashes at the optimization stage if I delete `unused` argument. wtf.
+
     let port = Constants.telegram_port()
 
     let id = _conn_id = _conn_id + 1 // (same as `let id = _conn_id++`)
@@ -57,49 +61,58 @@ actor Pool
 
       let conn = net.TCPConnection(where
         auth = _env.root as AmbientAuth,
-        notify = TelegramIdleConnectionNotify(_env, host, port, id, dc_id, this),
+        notify = TelegramIdleConnectionNotify(_env, host, port, id, dc_id, this, intermediate),
         host = host,
         service = port,
         init_size = 10240,
         max_size = 65535)
     end
 
-  fun ref _get_conn (dc_id: DcID): (ServerConnection | None) =>
+  fun ref _get_conn (dc_id: DcID, intermediate: Bool = false): (ServerConnection | None) =>
     // let conns: List[net.TCPConnection] ref = _conns.get_or_else(dcID, List[net.TCPConnection])
     try
-      let conns_list = _connected_conns(dc_id)?
+      let conns_list =
+        if intermediate == true then
+          _connected_intermediate_conns(dc_id)?
+        else
+          _connected_conns(dc_id)?
+        end
 
       let tuple = for v in conns_list.values() do
         conns_list.shift()?
         let id = v._1
+        let conn = v._2
         if _closed_conns.contains(id) then
           _closed_conns.unset(id)
+          conn.dispose()
         else
           break v
         end
       end
 
-      _create_new_connection(dc_id)?
+      create_new_connection(dc_id, intermediate)?
       tuple
     end
 
   be get_conn (
     dc_id: DcID,
-    proxy: Proxy
+    proxy: Proxy,
+    intermediate: Bool = false
   ) =>
     _client_conns_count = _client_conns_count + 1
 
     try
-      let conn_tuple = _get_conn(dc_id) as ServerConnection
+      let conn_tuple = _get_conn(dc_id, intermediate) as ServerConnection
       let conn = conn_tuple._2
       conn.set_notify(TelegramActiveConnectionNotify(proxy))
       proxy.set_server_conn(conn_tuple)
     else
       Debug("get_conn failed")
+      proxy.close_client_conn()
     end
 
-  be reconnect_after (ns: U64, id: ConnectionID, dc_id: DcID) =>
-    let timer = Timer(ReconnectTimerNotify(this, dc_id), ns)
+  be reconnect_after (ns: U64, id: ConnectionID, dc_id: DcID, intermediate: Bool) =>
+    let timer = Timer(ReconnectTimerNotify(this, dc_id, intermediate), ns)
     _timers(consume timer)
 
   be close_conn (id: ConnectionID) =>
@@ -110,11 +123,21 @@ actor Pool
     id: ConnectionID,
     conn: net.TCPConnection tag,
     encryptor: Obfuscated2Encryptor val,
-    decryptor: Obfuscated2Decryptor val
+    decryptor: Obfuscated2Decryptor val,
+    intermediate: Bool
   ) =>
-    try _connected_conns(dc_id)?.push(
-      (id, conn, encryptor, decryptor)
-    ) end
+    try
+      let conns_list =
+        if intermediate == true then
+          _connected_intermediate_conns(dc_id)?
+        else
+          _connected_conns(dc_id)?
+        end
+
+      conns_list.push(
+        (id, conn, encryptor, decryptor)
+      )
+    end
 
   be print_stats () =>
     var total_conns: USize = 0
@@ -129,14 +152,16 @@ actor Pool
 class ReconnectTimerNotify is TimerNotify
   let _pool: Pool
   let _dc_id: DcID
+  let _intermediate: Bool
 
-  new iso create(pool: Pool, dc_id: DcID) =>
+  new iso create(pool: Pool, dc_id: DcID, intermediate: Bool) =>
     _pool = pool
     _dc_id = dc_id
+    _intermediate = intermediate
 
   fun apply(timer: Timer, count: U64): Bool =>
     Debug("Reconnect!")
-    _pool._create_new_connection(_dc_id)
+    _pool.create_new_connection(_dc_id, _intermediate)
     false
 
 class StatsTimerNotify is TimerNotify
@@ -163,6 +188,9 @@ class TelegramActiveConnectionNotify is net.TCPConnectionNotify
     _proxy.received_server(data)
     true
 
+  fun closed(conn: net.TCPConnection ref) =>
+    Debug("Telegram connection closed")
+
   fun connect_failed(conn: net.TCPConnection ref) =>
     None
 
@@ -173,10 +201,12 @@ class TelegramIdleConnectionNotify is net.TCPConnectionNotify
   let _conn_id: ConnectionID
   let _dc_id: DcID
   let _pool: Pool
+  let _intermediate: Bool
 
   new iso create(
     env: Env, host: String, port: String,
-    id: ConnectionID, dc_id: DcID, pool: Pool
+    id: ConnectionID, dc_id: DcID, pool: Pool,
+    intermediate: Bool = false
   ) =>
     _env = env
     _host = host
@@ -184,6 +214,7 @@ class TelegramIdleConnectionNotify is net.TCPConnectionNotify
     _conn_id = id
     _dc_id = dc_id
     _pool = pool
+    _intermediate = intermediate
 
   fun received(
     conn: net.TCPConnection ref,
@@ -195,15 +226,28 @@ class TelegramIdleConnectionNotify is net.TCPConnectionNotify
     true
 
   fun connected(conn: net.TCPConnection ref) =>
-    Debug("Telegram: " + _host + ":" + _port + " - Connected")
+    Debug("Telegram: " + _host + ":" + _port + " - Connected" +
+      match _intermediate
+      | true => " (intermediate)"
+      else "" end)
+
     conn.set_keepalive(7200)
 
-    let random_buf = Obfuscated2Util.rand_bytes()
+    let random_buf = Obfuscated2Util.rand_bytes(_intermediate)
 
-    // let encryptor = recover val ServerEncryptor(random_buf) end
-    let encryptor = recover val FakeEncryptor(random_buf) end
-    // let decryptor = recover val ServerDecryptor(random_buf) end
-    let decryptor = recover val FakeDecryptor(random_buf) end
+    let encryptor =
+      if _intermediate == true then
+        recover val ServerEncryptor(random_buf) end
+      else
+        recover val FakeEncryptor(random_buf) end
+      end
+
+    let decryptor =
+      if _intermediate == true then
+        recover val ServerDecryptor(random_buf) end
+      else
+        recover val FakeDecryptor(random_buf) end
+      end
 
     let new_buf = recover val
       let buf_enc: Bytes ref = encryptor.obf(random_buf)
@@ -215,16 +259,16 @@ class TelegramIdleConnectionNotify is net.TCPConnectionNotify
 
     conn.write(new_buf)
 
-    _pool.conn_connected(_dc_id, _conn_id, conn, encryptor, decryptor)
+    _pool.conn_connected(_dc_id, _conn_id, conn, encryptor, decryptor, _intermediate)
 
   fun closed(conn: net.TCPConnection ref) =>
     _pool.close_conn(_conn_id)
     _env.out.print("Telegram: " + _host + ":" + _port + " - Idle connection closed\n" +
       "Retrying in 3 seconds...")
-    _pool.reconnect_after(3_000_000_000, _conn_id, _dc_id)
+    _pool.reconnect_after(3_000_000_000, _conn_id, _dc_id, _intermediate)
 
   fun connect_failed(conn: net.TCPConnection ref) =>
     _env.out.print("Telegram: " + _host + ":" + _port + " - Connect failed\n" +
       "Retrying in 3 seconds...")
     // Debug("err " + conn.get_so_error()._1.string() + " " + conn.get_so_error()._2.string())
-    _pool.reconnect_after(3_000_000_000, _conn_id, _dc_id)
+    _pool.reconnect_after(3_000_000_000, _conn_id, _dc_id, _intermediate)

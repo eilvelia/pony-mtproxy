@@ -1,4 +1,5 @@
 use net = "net"
+use "buffered"
 use "debug"
 
 class TCPServerNotify is net.TCPListenNotify
@@ -27,44 +28,17 @@ class TCPServerNotify is net.TCPListenNotify
   fun connected(listen: net.TCPListener ref): net.TCPConnectionNotify iso^ =>
     ClientConnectionNotify(_env, _pool, _secret)
 
-primitive ProxyUtil
-  fun get_dc_id (deobfed: Bytes box): (DcID | None) =>
-    try
-      if (
-        (deobfed(56)? != 0xef) or (deobfed(57)? != 0xef) or
-        (deobfed(58)? != 0xef) or (deobfed(59)? != 0xef)
-      ) and (
-        (deobfed(56)? != 0xee) or (deobfed(57)? != 0xee) or
-        (deobfed(58)? != 0xee) or (deobfed(59)? != 0xee)
-      ) then
-        Debug("Unknown protocol")
-        return None
-      end
-
-      let dcId = USize.from[U8](deobfed(60)? - 1)
-
-      if dcId > 4 then
-        Debug("dcId invalid: " + dcId.string())
-        return None
-      end
-
-      Debug("dcId: " + (dcId + 1).string())
-
-      dcId
-    else
-      Debug("Invalid deobfed")
-    end
-
 actor Proxy
   let _env: Env
   let _secret: Bytes
   let _pool: Pool
   let _client_conn: net.TCPConnection tag
   var _initialized: Bool = false
+  var _transport: (MtpTransportProtocol | None) = None
   var _server_connection: (net.TCPConnection tag | None) = None
   var _server_connection_id: (ConnectionID | None) = None
-  var _encryptor: (ClientEncryptor val | None) = None
-  var _decryptor: (ClientDecryptor val | None) = None
+  var _client_encryptor: (ClientEncryptor val | None) = None
+  var _client_decryptor: (ClientDecryptor val | None) = None
   var _server_encryptor: (Obfuscated2Encryptor val | None) = None
   var _server_decryptor: (Obfuscated2Decryptor val | None) = None
   let _server_buffer: Array[Bytes] = Array[Bytes]
@@ -95,6 +69,9 @@ actor Proxy
       _send_to_server(packet)
     end
 
+  be close_client_conn () =>
+    _client_conn.dispose()
+
   be received_client (data: Bytes) =>
     Debug("client data size: " + data.size().string() +
       "  init: " + _initialized.string() + "  server_conn: " +
@@ -116,24 +93,32 @@ actor Proxy
         data
       else
         _initialized = true
-        _initialize(data)
+        if _initialize(data) == false then
+          _client_conn.dispose()
+        end
         recover val data.slice(64) end
       end
 
     try
-      let decryptor = _decryptor as ClientDecryptor
+      let decryptor = _client_decryptor as ClientDecryptor
       let dec_payload = recover val decryptor.deobf(payload) end
 
       Debug("dec_payload size " + dec_payload.size().string())
 
-      // Debug("dec payload")
+      // Debug("From client decrypted")
       // Debug(dec_payload)
 
-      if dec_payload.size() > 0 then
-        _send_to_server(dec_payload)
+      let data_to_send: Bytes =
+        match _transport
+        | let t: MtpTransportProtocol => t(dec_payload)
+        else return end
+
+      // Debug("data_to_send")
+      // Debug(data_to_send)
+
+      if data_to_send.size() > 0 then
+        _send_to_server(data_to_send)
       end
-    else
-      Debug("Decryptor not defined")
     end
 
     Debug("\n--------\n")
@@ -146,14 +131,14 @@ actor Proxy
       // _env.out.print(data)
 
       let server_decryptor = _server_decryptor as Obfuscated2Decryptor
-      let client_encryptor = _encryptor as ClientEncryptor
+      let client_encryptor = _client_encryptor as ClientEncryptor
 
       let dec = recover val server_decryptor.deobf(data) end
       let enc = recover val client_encryptor.obf(dec) end
 
-      // Debug("dec")
+      // Debug("From server decrypted")
       // Debug(dec)
-      // _env.out.print("dec ascii")
+      // _env.out.print("From server decrypted ascii")
       // _env.out.print(dec)
 
       _client_conn.write(enc)
@@ -177,7 +162,7 @@ actor Proxy
       _server_buffer.push(data)
     end
 
-  fun ref _initialize (data: Bytes) =>
+  fun ref _initialize (data: Bytes): Bool =>
     let obf_enc_key_bytes = recover val data.slice(0, 64) end
 
     let decryptor = ClientDecryptor(_secret, obf_enc_key_bytes)
@@ -185,15 +170,55 @@ actor Proxy
 
     let deobfed = recover val decryptor.deobf(obf_enc_key_bytes) end
 
-    // Debug("auth")
-    // Debug(deobfed)
+    Debug("auth")
+    Debug(deobfed)
 
-    _decryptor = decryptor
-    _encryptor = encryptor
+    _client_decryptor = decryptor
+    _client_encryptor = encryptor
 
-    match ProxyUtil.get_dc_id(deobfed)
-    | let dcId: DcID => _pool.get_conn(dcId, this)
-    | None => _client_conn.dispose()
+    let reader = Reader
+    reader.append(deobfed)
+
+    try
+      reader.skip(56)?
+
+      let proto_tag = reader.u32_be()?
+
+      Debug("tag: " + proto_tag.string())
+
+      let mtp_transport: MtpTransportProtocol =
+        match proto_tag
+        | Constants.mtp_abridged() => MtpTcpAbridged
+        | Constants.mtp_intermediate() | Constants.mtp_secure() => MtpTcpIntermediate
+        else
+          Debug("Unknown protocol")
+          return false
+        end
+
+      _transport = mtp_transport
+
+      let dc_id = USize.from[U16](reader.i16_le()?.abs() - 1)
+
+      if dc_id > 4 then
+        Debug("DcID invalid: " + dc_id.string())
+        return false
+      end
+
+      Debug("DcID: " + (dc_id + 1).string())
+
+      let intermediate =
+        match mtp_transport
+        | MtpTcpIntermediate => true
+        else false end
+
+      Debug("intermediate: " + intermediate.string())
+
+      _pool.get_conn(dc_id, this, intermediate)
+
+      true
+    else
+      Debug("Unknown protocol: buffered.Reader error")
+      false
     end
 
 class ClientConnectionNotify is net.TCPConnectionNotify

@@ -19,6 +19,7 @@ actor Main
   fun usage () =>
     _env.out.print(
       """
+
       Usage: pony-mtproxy [options]
 
       Options:
@@ -51,6 +52,7 @@ actor Main
       (port, secret as Secret)
     else
       _env.out.print("Secret is not specified.")
+      usage()
       error
     end
 

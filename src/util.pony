@@ -1,4 +1,5 @@
 use "collections"
+use "buffered"
 
 primitive Util
   // fun print(env: Env, arr: Array[U8] box) =>
@@ -34,3 +35,32 @@ primitive Util
         )
       else arr end
     end
+
+  fun u32_le_to_buffer (num: U32): Bytes iso^ =>
+    recover
+      let writer = Writer
+      let arr: Bytes ref = Bytes
+
+      writer.u32_le(num)
+
+      for chunk in writer.done().values() do
+        arr.append(chunk)
+      end
+
+      arr
+    end
+
+  // fun byteSeqToArray (seq: ByteSeq): Array[U8] val =>
+  //   match seq
+  //   | let str: String => str.array()
+  //   | let arr: Array[U8] val => arr
+  //   end
+
+  // fun unnest[T: Any val](arr: Array[Array[T] val] val): Array[T] val =>
+  //   recover val
+  //     let out: Array[T] ref = Array[T]
+  //     for arr2 in arr.values() do
+  //       out.concat(arr2.values())
+  //     end
+  //     out
+  //  end

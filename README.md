@@ -30,7 +30,9 @@ $ pony-mtproxy --secret 15abcdef1234567890deadbeef123456
 
 ---
 
-Link example: `tg://proxy?server=SERVER_IP&port=PORT&secret=SECRET`
+Link example: `tg://proxy?server={SERVER_IP}&port={PORT}&secret={SECRET}`
+
+Link with secure mode: `tg://proxy?server={SERVER_IP}&port={PORT}&secret=dd{SECRET}`
 
 ## Building
 

@@ -80,16 +80,16 @@ class ServerEncryptor is Obfuscated2Encryptor
 
 class FakeDecryptor is Obfuscated2Decryptor
   new val create (obf_enc_key_bytes: Bytes) => None
-  new val none () => None
+  // new val none () => None
   fun deobf (data: Bytes): Bytes ref^ => data.clone()
 
 class FakeEncryptor is Obfuscated2Encryptor
   new val create (obf_enc_key_bytes: Bytes) => None
-  new val none () => None
+  // new val none () => None
   fun obf (data: Bytes): Bytes ref^ => data.clone()
 
 primitive Obfuscated2Util
-  fun rand_bytes (): Bytes /* 64 bytes */ =>
+  fun rand_bytes (intermediate: Bool = false): Bytes /* 64 bytes */ =>
     let seed = Time.now()._2.u64()
     let rand = Rand(seed)
 
@@ -121,14 +121,21 @@ primitive Obfuscated2Util
             and (val1 != 0x54534f50)
             and (val1 != 0x20544547)
             and (val1 != 0x4954504f)
-            and (val1 != 0xeeeeeeee)
+            and ((val1 != 0xeeeeeeee) or (intermediate == true))
           then break end
         end
 
-        buf'(56)? = 0xef
-        buf'(57)? = 0xef
-        buf'(58)? = 0xef
-        buf'(59)? = 0xef
+        if intermediate == true then
+          buf'(56)? = 0xee
+          buf'(57)? = 0xee
+          buf'(58)? = 0xee
+          buf'(59)? = 0xee
+        else
+          buf'(56)? = 0xef
+          buf'(57)? = 0xef
+          buf'(58)? = 0xef
+          buf'(59)? = 0xef
+        end
       end
       buf'
     end

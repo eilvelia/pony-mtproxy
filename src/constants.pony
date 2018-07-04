@@ -12,3 +12,7 @@ primitive Constants
   ]
 
   fun stats_interval(): U64 /* ns */ => 10_000_000_000
+
+  fun mtp_abridged(): U32 =>     0x_ef_ef_ef_ef
+  fun mtp_intermediate(): U32 => 0x_ee_ee_ee_ee
+  fun mtp_secure(): U32 =>       0x_dd_dd_dd_dd
