@@ -264,11 +264,11 @@ class TelegramIdleConnectionNotify is net.TCPConnectionNotify
   fun closed(conn: net.TCPConnection ref) =>
     _pool.close_conn(_conn_id)
     _env.out.print("Telegram: " + _host + ":" + _port + " - Idle connection closed\n" +
-      "Retrying in 3 seconds...")
-    _pool.reconnect_after(3_000_000_000, _conn_id, _dc_id, _intermediate)
+      "Retrying in 1 seconds...")
+    _pool.reconnect_after(1_000_000_000, _conn_id, _dc_id, _intermediate)
 
   fun connect_failed(conn: net.TCPConnection ref) =>
     _env.out.print("Telegram: " + _host + ":" + _port + " - Connect failed\n" +
-      "Retrying in 3 seconds...")
+      "Retrying in 2 seconds...")
     // Debug("err " + conn.get_so_error()._1.string() + " " + conn.get_so_error()._2.string())
-    _pool.reconnect_after(3_000_000_000, _conn_id, _dc_id, _intermediate)
+    _pool.reconnect_after(2_000_000_000, _conn_id, _dc_id, _intermediate)

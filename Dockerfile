@@ -1,6 +1,6 @@
 FROM ponylang/ponyc:0.22.6
-# FROM debian:9
 
+# FROM debian:9
 # # Installing ponyc
 # RUN \
 #   apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys "D401AB61" \
@@ -15,7 +15,7 @@ RUN apt-get install -y openssl
 
 COPY . /usr/app
 
-WORKDIR /usr/app
+# WORKDIR /usr/app
 
 # Building pony app
 RUN cd /usr/app \

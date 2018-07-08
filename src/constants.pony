@@ -1,5 +1,5 @@
 primitive Constants
-  fun min_idle_servers(): U32 => 4
+  fun min_idle_servers(): U32 => 15
 
   fun telegram_port(): String => "443"
 
