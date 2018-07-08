@@ -1,16 +1,21 @@
 use net = "net"
 use "buffered"
+use "time"
 use "debug"
 
 class TCPServerNotify is net.TCPListenNotify
   let _env: Env
-  let _pool: Pool
   let _secret: Bytes
+  let _timers: Timers = Timers
+  let _stats_printer: StatsPrinter
 
   new iso create(env: Env, secret: String) =>
     _env = env
-    _pool = Pool(env)
     _secret = Util.fromHex(secret)
+    _stats_printer = StatsPrinter(env)
+
+    let ns: U64 = Constants.stats_interval()
+    _timers(Timer(StatsTimerNotify(_stats_printer), ns, ns))
 
   fun listening(listen: net.TCPListener ref) =>
     try
@@ -26,17 +31,39 @@ class TCPServerNotify is net.TCPListenNotify
     _env.out.print("Not listening")
 
   fun connected(listen: net.TCPListener ref): net.TCPConnectionNotify iso^ =>
-    ClientConnectionNotify(_env, _pool, _secret)
+    _stats_printer.inc()
+    ClientConnectionNotify(_env, _secret)
+
+class StatsTimerNotify is TimerNotify
+  let _printer: StatsPrinter
+
+  new iso create(printer: StatsPrinter) =>
+    _printer = printer
+
+  fun apply(timer: Timer, count: U64): Bool =>
+    _printer.print()
+    true
+
+actor StatsPrinter
+  let _env: Env
+  var _total_conns: U64 = 0
+
+  new create (env: Env) =>
+    _env = env
+
+  be inc () =>
+    _total_conns = _total_conns + 1
+
+  be print () =>
+    _env.out.print("Total connections for all time: " + _total_conns.string())
 
 actor Proxy
   let _env: Env
   let _secret: Bytes
-  let _pool: Pool
   let _client_conn: net.TCPConnection tag
   var _initialized: Bool = false
   var _transport: (MtpTransportProtocol | None) = None
   var _server_connection: (net.TCPConnection tag | None) = None
-  var _server_connection_id: (ConnectionID | None) = None
   var _client_encryptor: (ClientEncryptor val | None) = None
   var _client_decryptor: (ClientDecryptor val | None) = None
   var _server_encryptor: (Obfuscated2Encryptor val | None) = None
@@ -46,27 +73,35 @@ actor Proxy
   new create (
     env: Env,
     secret: Bytes,
-    pool: Pool,
     client_conn: net.TCPConnection tag
   ) =>
     _env = env
     _secret = secret
-    _pool = pool
     _client_conn = client_conn
 
-  be set_server_conn (server_conn: ServerConnection) =>
-    Debug("set_server_conn")
-
-    ( _server_connection_id,
-      _server_connection,
-      _server_encryptor,
-      _server_decryptor
-    ) = server_conn
+  be server_ready (encryptor: Obfuscated2Encryptor, decryptor: Obfuscated2Decryptor) =>
+    _server_encryptor = encryptor
+    _server_decryptor = decryptor
 
     Debug("server_buffer packets " + _server_buffer.size().string())
     for packet in _server_buffer.values() do
       Debug("Send packet from buffer " + packet.size().string())
       _send_to_server(packet)
+    end
+
+  fun ref _create_new_connection (dc_id: DcID, intermediate: Bool = false) =>
+    let port = Constants.telegram_port()
+
+    try
+      let host = Constants.telegram_servers()(dc_id)?._2
+
+      _server_connection = net.TCPConnection(where
+        auth = _env.root as AmbientAuth,
+        notify = TelegramConnectionNotify(this, intermediate, _env),
+        host = host,
+        service = port,
+        init_size = 10240,
+        max_size = 65535)
     end
 
   be close_client_conn () =>
@@ -148,7 +183,6 @@ actor Proxy
 
   be client_closed () =>
     try (_server_connection as net.TCPConnection).dispose() end
-    try _pool.close_conn(_server_connection_id as ConnectionID) end
 
   fun ref _send_to_server (data: Bytes) =>
     try
@@ -213,7 +247,7 @@ actor Proxy
 
       Debug("intermediate: " + intermediate.string())
 
-      _pool.get_conn(dc_id, this, intermediate)
+      _create_new_connection(dc_id, intermediate)
 
       true
     else
@@ -223,15 +257,13 @@ actor Proxy
 
 class ClientConnectionNotify is net.TCPConnectionNotify
   let _env: Env
-  let _pool: Pool
   let _secret: Bytes
   var _host: String = "unknownhost"
   var _port: String = "unknownport"
   var _proxy: (Proxy | None) = None
 
-  new iso create(env: Env, pool: Pool, secret: Bytes) =>
+  new iso create(env: Env, secret: Bytes) =>
     _env = env
-    _pool = pool
     _secret = secret
 
   fun ref received(
@@ -246,7 +278,7 @@ class ClientConnectionNotify is net.TCPConnectionNotify
     try
       (_host, _port) = conn.remote_address().name()?
     end
-    _proxy = Proxy(_env, _secret, _pool, conn)
+    _proxy = Proxy(_env, _secret, conn)
     Debug("Client: " + _host + ":" + _port + " - Connected")
 
   fun closed(conn: net.TCPConnection ref) =>
