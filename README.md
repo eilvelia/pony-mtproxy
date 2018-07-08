@@ -20,6 +20,9 @@ Options:
 ```
   -p, --port    [string]  Defaults to '443'.
   -s, --secret  [string]
+
+  --ponythreads    Use N scheduler threads. Defaults to the number of
+                   cores (not hyperthreads) available.
 ```
 
 Example:
